@@ -1,0 +1,169 @@
+#sam build && sam deploy --parameter-overrides $(cat .sam-params)
+
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Sample SAM Template for journal app
+
+Globals:
+  Function:
+    MemorySize: 128
+    Timeout: 60
+  Api:
+    Cors:
+      AllowOrigin: "'*'"
+      AllowHeaders: "'Content-Type,x-api-key'"
+      AllowMethods: "'GET,PUT,POST,DELETE,OPTIONS'"
+
+Parameters:
+  SubdomainParam:
+    Type: String
+    Description: The subdomain
+    Default: ''
+  HostedZoneIDParam:
+    Type: String
+    Description: The hosted zone ID
+    Default: ''
+
+Resources:
+  CreateCommentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/comments-code/
+      Handler: create_comment.lambda_handler
+      Runtime: python3.8
+      Policies:
+        - DynamoDBWritePolicy:
+            TableName: !Ref CommentsDDBTable
+      Layers:
+        - !Ref DependenciesLayer
+      Environment:
+        Variables:
+          JOURNAL_DDB_TABLE: !Ref CommentsDDBTable
+      Events:
+        CommentAPIEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CommentApi
+            Path: /comments/
+            Method: post
+
+  CommentApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Auth:
+        AddDefaultAuthorizerToCorsPreflight: false
+
+  ReadCommentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/comments-code/
+      Handler: read_comment.lambda_handler
+      Runtime: python3.8
+      Policies:
+        - DynamoDBReadPolicy:
+            TableName: !Ref CommentsDDBTable
+      Layers:
+        - !Ref DependenciesLayer
+      Environment:
+        Variables:
+          JOURNAL_DDB_TABLE: !Ref CommentsDDBTable
+      Events:
+        CommentAPIEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CommentApi
+            Path: /comments/
+            Method: get
+
+  DeleteCommentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/comments-code/
+      Handler: delete_comment.lambda_handler
+      Runtime: python3.8
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CommentsDDBTable
+      Layers:
+        - !Ref DependenciesLayer
+      Environment:
+        Variables:
+          JOURNAL_DDB_TABLE: !Ref CommentsDDBTable
+      Events:
+        CommentAPIEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CommentApi
+            Path: /comments/
+            Method: delete
+
+  UpdateCommentFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/comments-code/
+      Handler: update_comment.lambda_handler
+      Runtime: python3.8
+      Policies:
+        - DynamoDBWritePolicy:
+            TableName: !Ref CommentsDDBTable
+      Layers:
+        - !Ref DependenciesLayer
+      Environment:
+        Variables:
+          JOURNAL_DDB_TABLE: !Ref CommentsDDBTable
+      Events:
+        CommentAPIEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CommentApi
+            Path: /comments/
+            Method: put
+
+  CommentsDDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: 'PK1'
+          AttributeType: 'S'
+        - AttributeName: 'SK1'
+          AttributeType: 'S'
+        - AttributeName: 'GSI1PK'
+          AttributeType: 'S'
+        - AttributeName: 'GSI1SK'
+          AttributeType: 'S'
+      BillingMode: 'PAY_PER_REQUEST'
+      KeySchema:
+        - AttributeName: 'PK1'
+          KeyType: 'HASH'
+        - AttributeName: 'SK1'
+          KeyType: 'RANGE'
+      GlobalSecondaryIndexes:
+        - IndexName: 'GSI1'
+          KeySchema:
+            - AttributeName: 'GSI1PK'
+              KeyType: 'HASH'
+            - AttributeName: 'GSI1SK'
+              KeyType: 'RANGE'
+          Projection:
+            ProjectionType: 'ALL'
+
+  DependenciesLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: DependenciesLayer
+      Description: Journal Dependencies
+      ContentUri: src/
+      CompatibleRuntimes:
+        - python3.7
+        - python3.8
+      LicenseInfo: MIT
+
+Outputs:
+  DDBTableName:
+    Value: !Ref CommentsDDBTable
+    Description: DDB Table
+  CommentApiEndpoint:
+    Description: 'API Gateway endpoint URL for Prod stage for Journal CRUD operations'
+    Value: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/comments/'
