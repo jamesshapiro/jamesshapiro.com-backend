@@ -4,7 +4,14 @@
   "States": {
     "Validate Email": {
       "Type": "Task",
-      "Resource": "${ValidateEmailFunctionArn}",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "Parameters": {
+        "FunctionName": "${ValidateEmailFunctionArn}",
+        "Payload": {
+          "COMMENTER_EMAIL.$": "$.COMMENTER_EMAIL",
+          "token.$": "$$.Task.Token"
+        }
+      },
       "Next": "Check Stock Value"
     },
     "Check Stock Value": {

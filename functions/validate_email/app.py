@@ -34,5 +34,3 @@ def lambda_handler(event, context):
     response = send_email(ses_client, commenter_email)
     print(response)
     return
-
-lambda_handler({}, None)
