@@ -5,10 +5,11 @@
     "Validate Email": {
       "Type": "Task",
       "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "TimeoutSeconds": 300,
       "Parameters": {
         "FunctionName": "${ValidateEmailFunctionArn}",
         "Payload": {
-          "COMMENTER_EMAIL.$": "$.COMMENTER_EMAIL",
+          "commenter_email.$": "$.commenter_email",
           "token.$": "$$.Task.Token"
         }
       },

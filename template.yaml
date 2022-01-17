@@ -36,6 +36,13 @@ Resources:
         - DynamoDBWritePolicy:
             TableName: !Ref TransactionTable
 
+  CommentApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Auth:
+        AddDefaultAuthorizerToCorsPreflight: false
+
   StockCheckerFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -53,6 +60,49 @@ Resources:
       Policies:
         - SESCrudPolicy:
             IdentityName: 'jamesshapirocomments+athens@gmail.com'
+      # Environment:
+      #   Variables:
+      #     CONFIRM_COMMENT_ENDPOINT: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/comments/'
+
+  RegisterEmailConfirmationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/register_email_confirmation/
+      Handler: app.lambda_handler
+      Runtime: python3.9
+      Timeout: 30
+      Role: !GetAtt RegisterEmailConfirmationRole.Arn
+      Events:
+        CommentAPIEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CommentApi
+            Path: /comments/
+            Method: post
+
+  RegisterEmailConfirmationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: '/'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: states:SendTaskSuccess
+                Resource: !Ref StockTradingStateMachine
 
   StockSellerFunction:
     Type: AWS::Serverless::Function
@@ -78,6 +128,71 @@ Resources:
         ReadCapacityUnits: 1
         WriteCapacityUnits: 1
 
+  #######################################################
+  ##### Start of Custom functions #####
+  #######################################################
+  ValueFuncExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: '/'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: lambda:UpdateFunctionConfiguration
+                Resource: !GetAtt ValidateEmailFunction.Arn
+
+  ValueFunc:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+          import boto3
+          import cfnresponse
+          import os
+          def lambda_handler(event, context):
+            response_code = 200
+            lambda_client = boto3.client('lambda')
+            confirm_comment_endpoint = os.environ['CONFIRM_COMMENT_ENDPOINT']
+            function_name = os.environ['FUNCTION_NAME']
+            response = lambda_client.update_function_configuration(
+              FunctionName=function_name,
+              Environment={
+                'Variables': {
+                    'CONFIRM_COMMENT_ENDPOINT': confirm_comment_endpoint
+                }
+              }
+            )
+            responseData = {}
+            responseData['Data'] = 'SUCCESS'
+            cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData, "CustomResourcePhysicalID", noEcho=True)
+      Handler: index.lambda_handler
+      Runtime: python3.8
+      Timeout: 30
+      Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ValueFuncExecutionRole}'
+      Environment:
+        Variables:
+          CONFIRM_COMMENT_ENDPOINT: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/comments/'
+          FUNCTION_NAME: !Ref ValidateEmailFunction
+  GetLambdaFunctionWasUpdatedValue:
+    Type: Custom::LambdaCallout
+    Properties:
+      ServiceToken: !GetAtt ValueFunc.Arn
+      #ApiKeyID: !Ref JournalEntryApiKey
+
 Outputs:
   StockTradingStateMachineArn:
     Description: 'Stock Trading State machine ARN'
@@ -85,3 +200,9 @@ Outputs:
   StockTradingStateMachineRoleArn:
     Description: 'IAM Role created for Stock Trading State machine based on the specified SAM Policy Templates'
     Value: !GetAtt StockTradingStateMachineRole.Arn
+  CommentApiEndpoint:
+    Description: 'API Gateway endpoint URL for Prod stage for Comment Approval Workflow operations'
+    Value: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/comments/'
+  LambdaFunctionUpdatedValue:
+    Description: 'Was the Lambda Function updated?'
+    Value: !GetAtt GetLambdaFunctionWasUpdatedValue.Data
