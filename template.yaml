@@ -78,7 +78,7 @@ Resources:
           Properties:
             RestApiId: !Ref CommentApi
             Path: /comments/
-            Method: post
+            Method: get
 
   RegisterEmailConfirmationRole:
     Type: AWS::IAM::Role
