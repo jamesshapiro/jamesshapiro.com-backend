@@ -1,15 +1,13 @@
 import boto3
-import os
 import json
 
 stepfunctions_client = boto3.client("stepfunctions")
 
 def lambda_handler(event, context):
     print(f'{event}=')
+    # TODO base64 encode/decode the token for safety
     token = event['queryStringParameters']['token']
     token = token.replace(' ','+')
-
-    print(f'{token[:100]=}')
 
     response = stepfunctions_client.send_task_success(
         taskToken=token,

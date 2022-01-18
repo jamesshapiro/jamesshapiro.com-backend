@@ -6,15 +6,15 @@ Description: >
   Sample SAM Template for sam-app
 
 Resources:
-  StockTradingStateMachine:
+  CommentValidator:
     Type: AWS::Serverless::StateMachine
     Properties:
-      DefinitionUri: statemachine/stock_trader.asl.json
+      DefinitionUri: statemachine/comment_validator.asl.json
       DefinitionSubstitutions:
         StockCheckerFunctionArn: !GetAtt StockCheckerFunction.Arn
         StockSellerFunctionArn: !GetAtt StockSellerFunction.Arn
         StockBuyerFunctionArn: !GetAtt StockBuyerFunction.Arn
-        ValidateEmailFunctionArn: !GetAtt ValidateEmailFunction.Arn
+        ChallengeEmailFunctionArn: !GetAtt ChallengeEmailFunction.Arn
         DDBPutItem: !Sub arn:${AWS::Partition}:states:::dynamodb:putItem
         DDBTable: !Ref TransactionTable
       Events:
@@ -24,6 +24,12 @@ Resources:
             Description: Schedule to run the stock trading state machine every hour
             Enabled: False
             Schedule: 'rate(1 hour)'
+        CommentAPIEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CommentApi
+            Path: /comments/
+            Method: post
       Policies:
         - LambdaInvokePolicy:
             FunctionName: !Ref StockCheckerFunction
@@ -32,7 +38,7 @@ Resources:
         - LambdaInvokePolicy:
             FunctionName: !Ref StockBuyerFunction
         - LambdaInvokePolicy:
-            FunctionName: !Ref ValidateEmailFunction
+            FunctionName: !Ref ChallengeEmailFunction
         - DynamoDBWritePolicy:
             TableName: !Ref TransactionTable
 
@@ -50,28 +56,25 @@ Resources:
       Handler: app.lambda_handler
       Runtime: python3.9
 
-  ValidateEmailFunction:
+  ChallengeEmailFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: functions/validate_email/
+      CodeUri: functions/challenge_email/
       Handler: app.lambda_handler
       Runtime: python3.9
       Timeout: 30
       Policies:
         - SESCrudPolicy:
             IdentityName: 'jamesshapirocomments+athens@gmail.com'
-      # Environment:
-      #   Variables:
-      #     CONFIRM_COMMENT_ENDPOINT: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/comments/'
 
-  RegisterEmailConfirmationFunction:
+  ConfirmEmailFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: functions/register_email_confirmation/
+      CodeUri: functions/confirm_email/
       Handler: app.lambda_handler
       Runtime: python3.9
       Timeout: 30
-      Role: !GetAtt RegisterEmailConfirmationRole.Arn
+      Role: !GetAtt ConfirmEmailRole.Arn
       Events:
         CommentAPIEvent:
           Type: Api
@@ -80,7 +83,7 @@ Resources:
             Path: /comments/
             Method: get
 
-  RegisterEmailConfirmationRole:
+  ConfirmEmailRole:
     Type: AWS::IAM::Role
     Properties:
       Path: '/'
@@ -102,7 +105,28 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: states:SendTaskSuccess
-                Resource: !Ref StockTradingStateMachine
+                Resource: !Ref CommentValidator
+
+  # SubmitCommentFunction:
+  #   Type: AWS::Serverless::Function
+  #   Properties:
+  #     CodeUri: functions/submit_comment/
+  #     Handler: app.lambda_handler
+  #     Runtime: python3.9
+  #     Timeout: 30
+  #     Policies:
+  #       - StepFunctionsExecutionPolicy:
+  #           StateMachineName: !GetAtt CommentValidator.Name
+  #     Environment:
+  #       Variables:
+  #         STATE_MACHINE_ARN: !Ref CommentValidator
+  #     Events:
+  #       CommentAPIEvent:
+  #         Type: Api
+  #         Properties:
+  #           RestApiId: !Ref CommentApi
+  #           Path: /comments/
+  #           Method: post
 
   StockSellerFunction:
     Type: AWS::Serverless::Function
@@ -153,7 +177,7 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: lambda:UpdateFunctionConfiguration
-                Resource: !GetAtt ValidateEmailFunction.Arn
+                Resource: !GetAtt ChallengeEmailFunction.Arn
 
   ValueFunc:
     Type: AWS::Lambda::Function
@@ -186,20 +210,21 @@ Resources:
       Environment:
         Variables:
           CONFIRM_COMMENT_ENDPOINT: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/comments/'
-          FUNCTION_NAME: !Ref ValidateEmailFunction
+          FUNCTION_NAME: !Ref ChallengeEmailFunction
   GetLambdaFunctionWasUpdatedValue:
     Type: Custom::LambdaCallout
     Properties:
       ServiceToken: !GetAtt ValueFunc.Arn
+      ChallengeEmailFunction: !Ref ChallengeEmailFunction
       #ApiKeyID: !Ref JournalEntryApiKey
 
 Outputs:
-  StockTradingStateMachineArn:
+  CommentValidatorArn:
     Description: 'Stock Trading State machine ARN'
-    Value: !Ref StockTradingStateMachine
-  StockTradingStateMachineRoleArn:
+    Value: !Ref CommentValidator
+  CommentValidatorRoleArn:
     Description: 'IAM Role created for Stock Trading State machine based on the specified SAM Policy Templates'
-    Value: !GetAtt StockTradingStateMachineRole.Arn
+    Value: !GetAtt CommentValidatorRole.Arn
   CommentApiEndpoint:
     Description: 'API Gateway endpoint URL for Prod stage for Comment Approval Workflow operations'
     Value: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/comments/'

@@ -1,3 +1,4 @@
+curl-test
 .env
 src/python/*
 .aws-sam

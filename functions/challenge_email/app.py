@@ -4,15 +4,19 @@ import os
 ses_client = boto3.client("ses")
 
 confirm_comment_endpoint = os.environ['CONFIRM_COMMENT_ENDPOINT']
+deny_comment_endpoint = os.environ['CONFIRM_COMMENT_ENDPOINT']
+unsubscribe_endpoint = os.environ['CONFIRM_COMMENT_ENDPOINT']
 
-def send_email(ses_client, commenter_email, token):
+def send_email(ses_client, commenter_email, comment, token):
     charset = "UTF-8"
     html_email_content = f"""
         <html>
             <head></head>
-            <h1 style='text-align:center'>This is the heading</h1>
-            <p>Hello, world</p>
-            <p>Please click <a href="{confirm_comment_endpoint}?token={token}">here</a>
+            <h3>Do you want to submit this comment?</h3>
+            <p>Comment: {comment}</p>
+            <p><a href="{confirm_comment_endpoint}?token={token}">CONFIRM</a> or <a href="{confirm_comment_endpoint}?token={token}">DENY</a></p>
+            <p>or</p>
+            <p><a href="{unsubscribe_endpoint}">Unsubscribe Forever</p>
             </body>
         </html>"""
     response = ses_client.send_email(
@@ -30,7 +34,7 @@ def send_email(ses_client, commenter_email, token):
             },
             "Subject": {
                 "Charset": charset,
-                "Data": "validation email",
+                "Data": "jamesshapiro.com Comment Validation",
             },
         },
         Source="JS Comment Validator <jamesshapirocomments+athens@gmail.com>",
@@ -39,7 +43,8 @@ def send_email(ses_client, commenter_email, token):
 
 def lambda_handler(event, context):
     commenter_email = event['commenter_email']
+    comment = event['comment']
     token = event['token']
-    response = send_email(ses_client, commenter_email, token)
+    response = send_email(ses_client, commenter_email, comment, token)
     print(response)
     return
