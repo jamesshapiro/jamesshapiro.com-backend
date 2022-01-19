@@ -14,21 +14,18 @@ Resources:
         StockCheckerFunctionArn: !GetAtt StockCheckerFunction.Arn
         StockSellerFunctionArn: !GetAtt StockSellerFunction.Arn
         StockBuyerFunctionArn: !GetAtt StockBuyerFunction.Arn
-        ChallengeEmailFunctionArn: !GetAtt ChallengeEmailFunction.Arn
+        ChallengeCommenterEmailFunctionArn: !GetAtt ChallengeCommenterEmailFunction.Arn
+        ChallengeModeratorEmailFunctionArn: !GetAtt ChallengeModeratorEmailFunction.Arn
         DDBPutItem: !Sub arn:${AWS::Partition}:states:::dynamodb:putItem
+        DDBUpdateItem: !Sub arn:${AWS::Partition}:states:::dynamodb:updateItem
         DDBTable: !Ref TransactionTable
+        CommentsDDBTable: !Ref CommentsDDBTable
       Events:
-        HourlyTradingSchedule:
-          Type: Schedule
-          Properties:
-            Description: Schedule to run the stock trading state machine every hour
-            Enabled: False
-            Schedule: 'rate(1 hour)'
         CommentAPIEvent:
           Type: Api
           Properties:
             RestApiId: !Ref CommentApi
-            Path: /comments/
+            Path: /commenter-confirmation/
             Method: post
       Policies:
         - LambdaInvokePolicy:
@@ -38,9 +35,13 @@ Resources:
         - LambdaInvokePolicy:
             FunctionName: !Ref StockBuyerFunction
         - LambdaInvokePolicy:
-            FunctionName: !Ref ChallengeEmailFunction
+            FunctionName: !Ref ChallengeCommenterEmailFunction
+        - LambdaInvokePolicy:
+            FunctionName: !Ref ChallengeModeratorEmailFunction
         - DynamoDBWritePolicy:
             TableName: !Ref TransactionTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref CommentsDDBTable
 
   CommentApi:
     Type: AWS::Serverless::Api
@@ -56,21 +57,24 @@ Resources:
       Handler: app.lambda_handler
       Runtime: python3.9
 
-  ChallengeEmailFunction:
+  ChallengeCommenterEmailFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: functions/challenge_email/
+      CodeUri: functions/challenge_commenter_email/
       Handler: app.lambda_handler
       Runtime: python3.9
       Timeout: 30
       Policies:
+        # TODO: parameterize
+        - DynamoDBWritePolicy:
+            TableName: !Ref CommentsDDBTable
         - SESCrudPolicy:
             IdentityName: 'jamesshapirocomments+athens@gmail.com'
 
-  ConfirmEmailFunction:
+  ConfirmCommenterEmailFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: functions/confirm_email/
+      CodeUri: functions/confirm_commenter_email/
       Handler: app.lambda_handler
       Runtime: python3.9
       Timeout: 30
@@ -80,7 +84,35 @@ Resources:
           Type: Api
           Properties:
             RestApiId: !Ref CommentApi
-            Path: /comments/
+            Path: /commenter-confirmation/
+            Method: get
+
+  ChallengeModeratorEmailFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/challenge_moderator_email/
+      Handler: app.lambda_handler
+      Runtime: python3.9
+      Timeout: 30
+      Policies:
+        # TODO: parameterize
+        - SESCrudPolicy:
+            IdentityName: 'jamesshapirocomments+athens@gmail.com'
+
+  ConfirmModeratorEmailFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: functions/confirm_moderator_email/
+      Handler: app.lambda_handler
+      Runtime: python3.9
+      Timeout: 30
+      Role: !GetAtt ConfirmEmailRole.Arn
+      Events:
+        CommentAPIEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref CommentApi
+            Path: /moderator-confirmation/
             Method: get
 
   ConfirmEmailRole:
@@ -104,7 +136,9 @@ Resources:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
-                Action: states:SendTaskSuccess
+                Action:
+                  - states:SendTaskSuccess
+                  - states:SendTaskFailure
                 Resource: !Ref CommentValidator
 
   # SubmitCommentFunction:
@@ -152,6 +186,34 @@ Resources:
         ReadCapacityUnits: 1
         WriteCapacityUnits: 1
 
+  CommentsDDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: 'PK1'
+          AttributeType: 'S'
+        - AttributeName: 'SK1'
+          AttributeType: 'S'
+        - AttributeName: 'GSI1PK'
+          AttributeType: 'S'
+        - AttributeName: 'GSI1SK'
+          AttributeType: 'S'
+      BillingMode: 'PAY_PER_REQUEST'
+      KeySchema:
+        - AttributeName: 'PK1'
+          KeyType: 'HASH'
+        - AttributeName: 'SK1'
+          KeyType: 'RANGE'
+      GlobalSecondaryIndexes:
+        - IndexName: 'GSI1'
+          KeySchema:
+            - AttributeName: 'GSI1PK'
+              KeyType: 'HASH'
+            - AttributeName: 'GSI1SK'
+              KeyType: 'RANGE'
+          Projection:
+            ProjectionType: 'ALL'
+
   #######################################################
   ##### Start of Custom functions #####
   #######################################################
@@ -177,7 +239,9 @@ Resources:
             Statement:
               - Effect: Allow
                 Action: lambda:UpdateFunctionConfiguration
-                Resource: !GetAtt ChallengeEmailFunction.Arn
+                Resource:
+                  - !GetAtt ChallengeCommenterEmailFunction.Arn
+                  - !GetAtt ChallengeModeratorEmailFunction.Arn
 
   ValueFunc:
     Type: AWS::Lambda::Function
@@ -188,35 +252,50 @@ Resources:
           import cfnresponse
           import os
           def lambda_handler(event, context):
-            response_code = 200
-            lambda_client = boto3.client('lambda')
-            confirm_comment_endpoint = os.environ['CONFIRM_COMMENT_ENDPOINT']
-            function_name = os.environ['FUNCTION_NAME']
-            response = lambda_client.update_function_configuration(
-              FunctionName=function_name,
-              Environment={
-                'Variables': {
-                    'CONFIRM_COMMENT_ENDPOINT': confirm_comment_endpoint
-                }
-              }
-            )
             responseData = {}
-            responseData['Data'] = 'SUCCESS'
-            cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData, "CustomResourcePhysicalID", noEcho=True)
+            try:
+              response_code = 200
+              lambda_client = boto3.client('lambda')
+              confirm_commenter_endpoint = os.environ['CONFIRM_COMMENTER_ENDPOINT']
+              confirm_moderator_endpoint = os.environ['CONFIRM_MODERATOR_ENDPOINT']
+              confirm_commenter_function_name = os.environ['CONFIRM_COMMENTER_FUNCTION_NAME']
+              confirm_moderator_function_name = os.environ['CONFIRM_MODERATOR_FUNCTION_NAME']
+              endpoints = [confirm_commenter_endpoint, confirm_moderator_endpoint]
+              function_names = [confirm_commenter_function_name, confirm_moderator_function_name]
+              for endpoint, function_name in zip(endpoints, function_names):
+                print(endpoint, function_name)
+                response = lambda_client.update_function_configuration(
+                  FunctionName=function_name,
+                  Environment={
+                    'Variables': {
+                        'CONFIRMATION_ENDPOINT': endpoint
+                    }
+                  }
+                )
+              responseData['Data'] = 'SUCCESS2'
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData, "CustomResourcePhysicalID", noEcho=True)
+            except:
+              responseData['Data'] = 'FAILURE'
+              cfnresponse.send(event, context, cfnresponse.FAILED, responseData, "CustomResourcePhysicalID" )
       Handler: index.lambda_handler
       Runtime: python3.8
       Timeout: 30
       Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ValueFuncExecutionRole}'
       Environment:
         Variables:
-          CONFIRM_COMMENT_ENDPOINT: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/comments/'
-          FUNCTION_NAME: !Ref ChallengeEmailFunction
+          # TODO: replace with outputs
+          CONFIRM_COMMENTER_ENDPOINT: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/commenter-confirmation/'
+          CONFIRM_MODERATOR_ENDPOINT: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/moderator-confirmation/'
+          CONFIRM_COMMENTER_FUNCTION_NAME: !Ref ChallengeCommenterEmailFunction
+          CONFIRM_MODERATOR_FUNCTION_NAME: !Ref ChallengeModeratorEmailFunction
   GetLambdaFunctionWasUpdatedValue:
     Type: Custom::LambdaCallout
     Properties:
       ServiceToken: !GetAtt ValueFunc.Arn
-      ChallengeEmailFunction: !Ref ChallengeEmailFunction
-      #ApiKeyID: !Ref JournalEntryApiKey
+      ChallengeCommenterEmailFunction: !Ref ChallengeCommenterEmailFunction
+      ConfirmCommenterEmailFunction: !Ref ConfirmCommenterEmailFunction
+      ChallengeModeratorEmailFunction: !Ref ChallengeModeratorEmailFunction
+      ConfirmModeratorEmailFunction: !Ref ConfirmModeratorEmailFunction
 
 Outputs:
   CommentValidatorArn:
@@ -225,9 +304,12 @@ Outputs:
   CommentValidatorRoleArn:
     Description: 'IAM Role created for Stock Trading State machine based on the specified SAM Policy Templates'
     Value: !GetAtt CommentValidatorRole.Arn
-  CommentApiEndpoint:
+  ConfirmCommenterApiEndpoint:
     Description: 'API Gateway endpoint URL for Prod stage for Comment Approval Workflow operations'
-    Value: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/comments/'
+    Value: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/commenter-confirmation/'
+  ConfirmModeratorApiEndpoint:
+    Description: 'API Gateway endpoint URL for Prod stage for Comment Approval Workflow operations'
+    Value: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/moderator-confirmation/'
   LambdaFunctionUpdatedValue:
     Description: 'Was the Lambda Function updated?'
     Value: !GetAtt GetLambdaFunctionWasUpdatedValue.Data

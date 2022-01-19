@@ -1,19 +1,110 @@
 {
   "Comment": "A state machine that requires email confirmation from the commenter and site owner before a comment is published.",
-  "StartAt": "Challenge Email",
+  "StartAt": "Challenge Commenter Email",
   "States": {
-    "Challenge Email": {
+    "Challenge Commenter Email": {
       "Type": "Task",
       "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
       "TimeoutSeconds": 3600,
       "Parameters": {
-        "FunctionName": "${ChallengeEmailFunctionArn}",
+        "FunctionName": "${ChallengeCommenterEmailFunctionArn}",
         "Payload": {
+          "post_id.$": "$.post_id",
           "commenter_email.$": "$.commenter_email",
-          "comment.$": "$.comment",
+          "comment_validator_email.$": "$.comment_validator_email",
+          "moderator_email.$": "$.moderator_email",
+          "comment_text.$": "$.comment_text",
           "token.$": "$$.Task.Token"
         }
       },
+      "Next": "Record Comment",
+      "ResultPath": "$.taskresult"
+    },
+    "Record Comment": {
+      "Type": "Task",
+      "Resource": "${DDBPutItem}",
+      "Parameters": {
+        "TableName": "${CommentsDDBTable}",
+        "Item": {
+          "PK1": {
+            "S.$": "$.post_id"
+          },
+          "SK1": {
+            "S.$": "$.taskresult.comment_ulid"
+          },
+          "COMMENT_TEXT": {
+            "S.$": "$.comment_text"
+          },
+          "COMMENTER_EMAIL": {
+            "S.$": "$.commenter_email"
+          },
+          "COMMENTER_APPROVED": {
+            "S": "true"
+          },
+          "MODERATOR_APPROVED": {
+            "S": "false"
+          }
+        }
+      },
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 20,
+          "MaxAttempts": 5,
+          "BackoffRate": 10
+        }
+      ],
+      "Next": "Challenge Moderator Email",
+      "ResultPath": null
+    },
+    "Challenge Moderator Email": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "TimeoutSeconds": 604800,
+      "Parameters": {
+        "FunctionName": "${ChallengeModeratorEmailFunctionArn}",
+        "Payload": {
+          "post_id.$": "$.post_id",
+          "commenter_email.$": "$.commenter_email",
+          "comment_validator_email.$": "$.comment_validator_email",
+          "moderator_email.$": "$.moderator_email",
+          "comment_text.$": "$.comment_text",
+          "token.$": "$$.Task.Token"
+        }
+      },
+      "Next": "Approve Comment",
+      "ResultPath": null
+    },
+    "Approve Comment": {
+      "Type": "Task",
+      "Resource": "${DDBUpdateItem}",
+      "Parameters": {
+        "TableName": "${CommentsDDBTable}",
+        "Key": {
+          "PK1": {
+            "S.$": "$.post_id"
+          },
+          "SK1": {
+            "S.$": "$.taskresult.comment_ulid"
+          }
+        },
+        "UpdateExpression": "SET #moderator_approved = :true_literal",
+        "ExpressionAttributeNames": {
+          "#moderator_approved": "MODERATOR_APPROVED"
+        },
+        "ExpressionAttributeValues": {
+          ":true_literal": "true"
+        }
+      },
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 20,
+          "MaxAttempts": 5,
+          "BackoffRate": 10
+        }
+      ],
+      "ResultPath": null,
       "Next": "Check Stock Value"
     },
     "Check Stock Value": {
