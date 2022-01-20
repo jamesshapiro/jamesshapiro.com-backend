@@ -11,14 +11,10 @@ Resources:
     Properties:
       DefinitionUri: statemachine/comment_validator.asl.json
       DefinitionSubstitutions:
-        StockCheckerFunctionArn: !GetAtt StockCheckerFunction.Arn
-        StockSellerFunctionArn: !GetAtt StockSellerFunction.Arn
-        StockBuyerFunctionArn: !GetAtt StockBuyerFunction.Arn
         ChallengeCommenterEmailFunctionArn: !GetAtt ChallengeCommenterEmailFunction.Arn
         ChallengeModeratorEmailFunctionArn: !GetAtt ChallengeModeratorEmailFunction.Arn
         DDBPutItem: !Sub arn:${AWS::Partition}:states:::dynamodb:putItem
         DDBUpdateItem: !Sub arn:${AWS::Partition}:states:::dynamodb:updateItem
-        DDBTable: !Ref TransactionTable
         CommentsDDBTable: !Ref CommentsDDBTable
       Events:
         CommentAPIEvent:
@@ -29,17 +25,9 @@ Resources:
             Method: post
       Policies:
         - LambdaInvokePolicy:
-            FunctionName: !Ref StockCheckerFunction
-        - LambdaInvokePolicy:
-            FunctionName: !Ref StockSellerFunction
-        - LambdaInvokePolicy:
-            FunctionName: !Ref StockBuyerFunction
-        - LambdaInvokePolicy:
             FunctionName: !Ref ChallengeCommenterEmailFunction
         - LambdaInvokePolicy:
             FunctionName: !Ref ChallengeModeratorEmailFunction
-        - DynamoDBWritePolicy:
-            TableName: !Ref TransactionTable
         - DynamoDBCrudPolicy:
             TableName: !Ref CommentsDDBTable
 
@@ -49,13 +37,6 @@ Resources:
       StageName: Prod
       Auth:
         AddDefaultAuthorizerToCorsPreflight: false
-
-  StockCheckerFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: functions/stock_checker/
-      Handler: app.lambda_handler
-      Runtime: python3.9
 
   ChallengeCommenterEmailFunction:
     Type: AWS::Serverless::Function
@@ -140,51 +121,6 @@ Resources:
                   - states:SendTaskSuccess
                   - states:SendTaskFailure
                 Resource: !Ref CommentValidator
-
-  # SubmitCommentFunction:
-  #   Type: AWS::Serverless::Function
-  #   Properties:
-  #     CodeUri: functions/submit_comment/
-  #     Handler: app.lambda_handler
-  #     Runtime: python3.9
-  #     Timeout: 30
-  #     Policies:
-  #       - StepFunctionsExecutionPolicy:
-  #           StateMachineName: !GetAtt CommentValidator.Name
-  #     Environment:
-  #       Variables:
-  #         STATE_MACHINE_ARN: !Ref CommentValidator
-  #     Events:
-  #       CommentAPIEvent:
-  #         Type: Api
-  #         Properties:
-  #           RestApiId: !Ref CommentApi
-  #           Path: /comments/
-  #           Method: post
-
-  StockSellerFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: functions/stock_seller/
-      Handler: app.lambda_handler
-      Runtime: python3.9
-
-  StockBuyerFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: functions/stock_buyer/
-      Handler: app.lambda_handler
-      Runtime: python3.9
-
-  TransactionTable:
-    Type: AWS::Serverless::SimpleTable
-    Properties:
-      PrimaryKey:
-        Name: Id
-        Type: String
-      ProvisionedThroughput:
-        ReadCapacityUnits: 1
-        WriteCapacityUnits: 1
 
   CommentsDDBTable:
     Type: AWS::DynamoDB::Table
@@ -272,7 +208,7 @@ Resources:
                     }
                   }
                 )
-              responseData['Data'] = 'SUCCESS2'
+              responseData['Data'] = 'SUCCESS3'
               cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData, "CustomResourcePhysicalID", noEcho=True)
             except:
               responseData['Data'] = 'FAILURE'

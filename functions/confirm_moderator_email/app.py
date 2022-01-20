@@ -10,24 +10,16 @@ def lambda_handler(event, context):
     token = token.replace(' ','+')
     decision = event['queryStringParameters']['decision']
 
+    message = 'Comment rejected by moderator.'
     if decision == 'confirm':
-        response = stepfunctions_client.send_task_success(
-            taskToken=token,
-            output=json.dumps({"success": "success"})
-        )
-        print(response)
-        return {
-            'statusCode': 200,
-            'body': json.dumps('Comment verified, now pending approval from James!')
-        }
-    else:
-        response = stepfunctions_client.send_task_failure(
-            taskToken=token,
-            error='User Rejected Comment',
-            cause='User Rejected Comment'
-        )
-        print(response)
+        message = 'Comment approved by moderator'
+
+    response = stepfunctions_client.send_task_success(
+        taskToken=token,
+        output=json.dumps({"decision": decision})
+    )
+    print(response)
     return {
         'statusCode': 200,
-        'body': json.dumps('Comment successfully rejected!')
+        'body': message
     }
