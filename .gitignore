@@ -1,4 +1,4 @@
-curl-test
+curl-test.txt
 .env
 src/python/*
 .aws-sam

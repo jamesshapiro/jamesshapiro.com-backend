@@ -17,11 +17,11 @@ Resources:
         DDBUpdateItem: !Sub arn:${AWS::Partition}:states:::dynamodb:updateItem
         CommentsDDBTable: !Ref CommentsDDBTable
       Events:
-        CommentAPIEvent:
+        CommentApiEvent:
           Type: Api
           Properties:
             RestApiId: !Ref CommentApi
-            Path: /commenter-confirmation/
+            Path: /entry-point/
             Method: post
       Policies:
         - LambdaInvokePolicy:
@@ -37,6 +37,100 @@ Resources:
       StageName: Prod
       Auth:
         AddDefaultAuthorizerToCorsPreflight: false
+    # Type: AWS::Serverless::Api
+    # Properties:
+    #   StageName: Prod
+    #   OpenApiVersion: '3.0.1'
+    #   DefinitionBody:
+    #     openapi: '3.0.1'
+    #     paths:
+    #       /comment-confirm:
+    #         get:
+    #           parameters:
+    #             - name: 'taskToken'
+    #               in: 'query'
+    #               schema:
+    #                 type: 'string'
+    #           responses:
+    #             '200':
+    #               description: '200 response'
+    #               content: {}
+    #           security:
+    #             - authorizer: []
+    #           x-amazon-apigateway-integration:
+    #             credentials: !GetAtt ConfirmCommenterApiRole.Arn
+    #             httpMethod: 'POST'
+    #             uri: 'arn:aws:apigateway:us-east-1:states:action/SendTaskSuccess'
+    #             responses:
+    #               default:
+    #                 statusCode: '200'
+    #             requestTemplates:
+    #               application/json:
+    #                 "{\n   \"output\": \"\\\"Approve link was clicked.\\\"\
+    #                 \",\n   \"taskToken\": \"$input.params('taskToken')\"\n}"
+    #             passthroughBehavior: 'when_no_templates'
+    #             type: 'aws'
+
+  ConfirmCommenterApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt CommentApi.RootResourceId
+      PathPart: commenter-confirmation
+      RestApiId: !Ref CommentApi
+
+  ConfirmCommenterApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      Description: production
+      RestApiId: !Ref CommentApi
+      StageName: production
+    DependsOn: ConfirmCommenterApiMethod
+
+  ConfirmCommenterApiRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: '/'
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - sts:AssumeRole
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:SendTaskSuccess
+                Resource: !Ref CommentValidator
+
+  ConfirmCommenterApiMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      HttpMethod: 'GET'
+      AuthorizationType: 'NONE'
+      RequestParameters:
+        method.request.querystring.token: true
+      Integration:
+        Type: AWS
+        Uri: 'arn:aws:apigateway:us-east-1:states:action/SendTaskSuccess'
+        IntegrationHttpMethod: 'POST'
+        PassthroughBehavior: 'WHEN_NO_TEMPLATES'
+        #RequestParameters:
+        #  method.request.querystring.token: 'method.request.querystring.token'
+        RequestTemplates:
+          #'application/json': '{"taskToken": "$input.params(''token'')"}'
+          #'application/json': '{"output": "[\"SUCCESS\"]", "taskToken": "$input.params(''token'')"}'
+          'application/json': '{"output": "{\"decision\": \"confirm\", \"comment_ulid\": \"DUMMY#ULID\"}", "taskToken": "$input.params(''token'')"}'
+
+        Credentials: !GetAtt ConfirmCommenterApiRole.Arn
+      RestApiId: !Ref CommentApi
+      ResourceId: !Ref ConfirmCommenterApiResource
 
   ChallengeCommenterEmailFunction:
     Type: AWS::Serverless::Function
@@ -60,13 +154,13 @@ Resources:
       Runtime: python3.9
       Timeout: 30
       Role: !GetAtt ConfirmEmailRole.Arn
-      Events:
-        CommentAPIEvent:
-          Type: Api
-          Properties:
-            RestApiId: !Ref CommentApi
-            Path: /commenter-confirmation/
-            Method: get
+      # Events:
+      #   CommentApiEvent:
+      #     Type: Api
+      #     Properties:
+      #       RestApiId: !Ref CommentApi
+      #       Path: /commenter-confirmation/
+      #       Method: get
 
   ChallengeModeratorEmailFunction:
     Type: AWS::Serverless::Function
@@ -89,7 +183,7 @@ Resources:
       Timeout: 30
       Role: !GetAtt ConfirmEmailRole.Arn
       Events:
-        CommentAPIEvent:
+        CommentApiEvent:
           Type: Api
           Properties:
             RestApiId: !Ref CommentApi
@@ -119,7 +213,6 @@ Resources:
               - Effect: Allow
                 Action:
                   - states:SendTaskSuccess
-                  - states:SendTaskFailure
                 Resource: !Ref CommentValidator
 
   CommentsDDBTable:
@@ -219,9 +312,8 @@ Resources:
       Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ValueFuncExecutionRole}'
       Environment:
         Variables:
-          # TODO: replace with outputs
-          CONFIRM_COMMENTER_ENDPOINT: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/commenter-confirmation/'
-          CONFIRM_MODERATOR_ENDPOINT: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/moderator-confirmation/'
+          CONFIRM_COMMENTER_ENDPOINT: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/production/commenter-confirmation/'
+          CONFIRM_MODERATOR_ENDPOINT: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/production/moderator-confirmation/'
           CONFIRM_COMMENTER_FUNCTION_NAME: !Ref ChallengeCommenterEmailFunction
           CONFIRM_MODERATOR_FUNCTION_NAME: !Ref ChallengeModeratorEmailFunction
   GetLambdaFunctionWasUpdatedValue:
@@ -242,10 +334,10 @@ Outputs:
     Value: !GetAtt CommentValidatorRole.Arn
   ConfirmCommenterApiEndpoint:
     Description: 'API Gateway endpoint URL for Prod stage for Comment Approval Workflow operations'
-    Value: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/commenter-confirmation/'
+    Value: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/production/commenter-confirmation/'
   ConfirmModeratorApiEndpoint:
     Description: 'API Gateway endpoint URL for Prod stage for Comment Approval Workflow operations'
-    Value: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/moderator-confirmation/'
+    Value: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/production/moderator-confirmation/'
   LambdaFunctionUpdatedValue:
     Description: 'Was the Lambda Function updated?'
     Value: !GetAtt GetLambdaFunctionWasUpdatedValue.Data

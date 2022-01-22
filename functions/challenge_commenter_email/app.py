@@ -8,13 +8,14 @@ confirm_comment_endpoint = os.environ['CONFIRMATION_ENDPOINT']
 unsubscribe_endpoint = os.environ['CONFIRMATION_ENDPOINT']
 
 def send_email(ses_client, commenter_email, comment_validator_email, comment_text, token):
+    token = token.replace('+','%2B')
     charset = "UTF-8"
     html_email_content = f"""
         <html>
             <head></head>
             <h3>Do you want to submit this comment?</h3>
             <p>Comment: {comment_text}</p>
-            <p><a href="{confirm_comment_endpoint}?token={token}&decision=confirm">CONFIRM</a> or <a href="{confirm_comment_endpoint}?token={token}&decision=deny">DENY</a></p>
+            <p><a href="{confirm_comment_endpoint}?token={token}">CONFIRM</a> or <a href="{confirm_comment_endpoint}?token={token}">DENY</a></p>
             <p>or</p>
             <p><a href="{unsubscribe_endpoint}">Unsubscribe Forever</p>
             </body>
