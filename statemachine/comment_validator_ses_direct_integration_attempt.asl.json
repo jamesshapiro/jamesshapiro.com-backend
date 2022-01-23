@@ -1,0 +1,148 @@
+{
+  "Comment": "A state machine that requires email confirmation from the commenter and site owner before a comment is published.",
+  "StartAt": "Generate Ulid",
+  "States": {
+    "Generate Ulid": {
+      "Type": "Task",
+      "Resource": "${GenerateUlidFunctionArn}",
+      "TimeoutSeconds": 30,
+      "Next": "Challenge Commenter Email",
+      "ResultPath": "$.ulid"
+    },
+    "Challenge Commenter Email": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:ses:sendEmail.waitForTaskToken",
+      "TimeoutSeconds": 3600,
+      "Parameters": {
+        "Destination": {
+          "ToAddresses.$": "States.Array($.commenter_email)"
+        },
+        "Message": {
+          "Body": {
+            "Html": {
+              "Data.$": "States.Format('<html><head></head><h3>Do you want to submit this comment?</h3><p>Comment: {}</p><p><a href=\"{}?token={}\">CONFIRM</a></html>', $.comment_text, $.confirm_comment_endpoint, $$.Task.Token)"
+            }
+          },
+          "Subject": {
+            "Data.$": "States.Format('JS Commenter Validation: {}', $.ulid.ulid)"
+          }
+        },
+        "Source.$": "States.Format('JS Comment Validator <{}>', $.comment_validator_email)"
+      },
+      "Next": "Check Commenter Decision",
+      "ResultPath": "$.taskresult"
+    },
+    "Check Commenter Decision": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.taskresult.decision",
+          "StringEquals": "confirm",
+          "Next": "Record Comment"
+        }
+      ],
+      "Default": "Reject State"
+    },
+    "Reject State": {
+      "Type": "Succeed"
+    },
+    "Record Comment": {
+      "Type": "Task",
+      "Resource": "${DDBPutItem}",
+      "Parameters": {
+        "TableName": "${CommentsDDBTable}",
+        "Item": {
+          "PK1": {
+            "S.$": "$.post_id"
+          },
+          "SK1": {
+            "S.$": "$.taskresult.comment_ulid"
+          },
+          "COMMENT_TEXT": {
+            "S.$": "$.comment_text"
+          },
+          "COMMENTER_EMAIL": {
+            "S.$": "$.commenter_email"
+          },
+          "COMMENTER_APPROVED": {
+            "S": "true"
+          },
+          "MODERATOR_APPROVED": {
+            "S": "false"
+          }
+        }
+      },
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 20,
+          "MaxAttempts": 5,
+          "BackoffRate": 10
+        }
+      ],
+      "Next": "Challenge Moderator Email",
+      "ResultPath": null
+    },
+    "Challenge Moderator Email": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
+      "TimeoutSeconds": 604800,
+      "Parameters": {
+        "FunctionName": "${ChallengeModeratorEmailFunctionArn}",
+        "Payload": {
+          "post_id.$": "$.post_id",
+          "commenter_email.$": "$.commenter_email",
+          "comment_validator_email.$": "$.comment_validator_email",
+          "moderator_email.$": "$.moderator_email",
+          "comment_text.$": "$.comment_text",
+          "token.$": "$$.Task.Token"
+        }
+      },
+      "Next": "Check Moderator Decision",
+      "ResultPath": "$.moderatordecision"
+    },
+    "Check Moderator Decision": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.moderatordecision.decision",
+          "StringEquals": "confirm",
+          "Next": "Approve Comment"
+        }
+      ],
+      "Default": "Reject State"
+    },
+    "Approve Comment": {
+      "Type": "Task",
+      "Resource": "${DDBUpdateItem}",
+      "Parameters": {
+        "TableName": "${CommentsDDBTable}",
+        "Key": {
+          "PK1": {
+            "S.$": "$.post_id"
+          },
+          "SK1": {
+            "S.$": "$.taskresult.comment_ulid"
+          }
+        },
+        "UpdateExpression": "SET #moderator_approved = :true_literal",
+        "ExpressionAttributeNames": {
+          "#moderator_approved": "MODERATOR_APPROVED"
+        },
+        "ExpressionAttributeValues": {
+          ":true_literal": "true"
+        }
+      },
+      "Retry": [
+        {
+          "ErrorEquals": ["States.TaskFailed"],
+          "IntervalSeconds": 20,
+          "MaxAttempts": 5,
+          "BackoffRate": 10
+        }
+      ],
+      "ResultPath": null,
+      "End": true
+    }
+  }
+}
