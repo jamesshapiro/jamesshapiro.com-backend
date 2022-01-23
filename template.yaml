@@ -13,6 +13,7 @@ Resources:
       DefinitionSubstitutions:
         ChallengeCommenterEmailFunctionArn: !GetAtt ChallengeCommenterEmailFunction.Arn
         ChallengeModeratorEmailFunctionArn: !GetAtt ChallengeModeratorEmailFunction.Arn
+        GenerateUlidFunctionArn: !GetAtt GenerateUlidFunction.Arn
         DDBPutItem: !Sub arn:${AWS::Partition}:states:::dynamodb:putItem
         DDBUpdateItem: !Sub arn:${AWS::Partition}:states:::dynamodb:updateItem
         CommentsDDBTable: !Ref CommentsDDBTable
@@ -27,6 +28,8 @@ Resources:
         - LambdaInvokePolicy:
             FunctionName: !Ref ChallengeCommenterEmailFunction
         - LambdaInvokePolicy:
+            FunctionName: !Ref GenerateUlidFunction
+        - LambdaInvokePolicy:
             FunctionName: !Ref ChallengeModeratorEmailFunction
         - DynamoDBCrudPolicy:
             TableName: !Ref CommentsDDBTable
@@ -37,39 +40,6 @@ Resources:
       StageName: Prod
       Auth:
         AddDefaultAuthorizerToCorsPreflight: false
-    # Type: AWS::Serverless::Api
-    # Properties:
-    #   StageName: Prod
-    #   OpenApiVersion: '3.0.1'
-    #   DefinitionBody:
-    #     openapi: '3.0.1'
-    #     paths:
-    #       /comment-confirm:
-    #         get:
-    #           parameters:
-    #             - name: 'taskToken'
-    #               in: 'query'
-    #               schema:
-    #                 type: 'string'
-    #           responses:
-    #             '200':
-    #               description: '200 response'
-    #               content: {}
-    #           security:
-    #             - authorizer: []
-    #           x-amazon-apigateway-integration:
-    #             credentials: !GetAtt ConfirmCommenterApiRole.Arn
-    #             httpMethod: 'POST'
-    #             uri: 'arn:aws:apigateway:us-east-1:states:action/SendTaskSuccess'
-    #             responses:
-    #               default:
-    #                 statusCode: '200'
-    #             requestTemplates:
-    #               application/json:
-    #                 "{\n   \"output\": \"\\\"Approve link was clicked.\\\"\
-    #                 \",\n   \"taskToken\": \"$input.params('taskToken')\"\n}"
-    #             passthroughBehavior: 'when_no_templates'
-    #             type: 'aws'
 
   ConfirmCommenterApiResource:
     Type: AWS::ApiGateway::Resource
@@ -146,21 +116,14 @@ Resources:
         - SESCrudPolicy:
             IdentityName: 'jamesshapirocomments+athens@gmail.com'
 
-  ConfirmCommenterEmailFunction:
+  GenerateUlidFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: functions/confirm_commenter_email/
+      CodeUri: functions/generate_ulid/
       Handler: app.lambda_handler
       Runtime: python3.9
       Timeout: 30
-      Role: !GetAtt ConfirmEmailRole.Arn
-      # Events:
-      #   CommentApiEvent:
-      #     Type: Api
-      #     Properties:
-      #       RestApiId: !Ref CommentApi
-      #       Path: /commenter-confirmation/
-      #       Method: get
+      # Role: !GetAtt ConfirmEmailRole.Arn
 
   ChallengeModeratorEmailFunction:
     Type: AWS::Serverless::Function
@@ -321,7 +284,6 @@ Resources:
     Properties:
       ServiceToken: !GetAtt ValueFunc.Arn
       ChallengeCommenterEmailFunction: !Ref ChallengeCommenterEmailFunction
-      ConfirmCommenterEmailFunction: !Ref ConfirmCommenterEmailFunction
       ChallengeModeratorEmailFunction: !Ref ChallengeModeratorEmailFunction
       ConfirmModeratorEmailFunction: !Ref ConfirmModeratorEmailFunction
 
