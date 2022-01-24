@@ -5,7 +5,8 @@ ses_client = boto3.client("ses")
 
 confirm_comment_endpoint = os.environ['CONFIRMATION_ENDPOINT']
 
-def send_email(ses_client, commenter_email, comment_validator_email, moderator_email, comment_text, token):
+def send_email(ses_client, commenter_email, comment_validator_email, moderator_email, comment_text, token, my_ulid):
+    token = token.replace('+','%2B')
     charset = "UTF-8"
     html_email_content = f"""
         <html>
@@ -31,10 +32,10 @@ def send_email(ses_client, commenter_email, comment_validator_email, moderator_e
             },
             "Subject": {
                 "Charset": charset,
-                "Data": "JS Comment Moderation",
+                "Data": f"Moderate JS Comment: {my_ulid[-6:]}",
             },
         },
-        Source=f"JS Comment Validator <{comment_validator_email}>",
+        Source=f"JS Comments <{comment_validator_email}>",
     )
     return response
 
@@ -43,7 +44,8 @@ def lambda_handler(event, context):
     comment_validator_email = event['comment_validator_email']
     moderator_email = event['moderator_email']
     comment_text = event['comment_text']
+    my_ulid = event['ulid']
     token = event['token']
-    response = send_email(ses_client, commenter_email, comment_validator_email, moderator_email, comment_text, token)
+    response = send_email(ses_client, commenter_email, comment_validator_email, moderator_email, comment_text, token, my_ulid)
     print(response)
     return

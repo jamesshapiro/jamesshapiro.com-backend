@@ -7,7 +7,7 @@ dynamodb_client = boto3.client("dynamodb")
 confirm_comment_endpoint = os.environ['CONFIRMATION_ENDPOINT']
 unsubscribe_endpoint = os.environ['CONFIRMATION_ENDPOINT']
 
-def send_email(ses_client, commenter_email, comment_validator_email, comment_text, token):
+def send_email(ses_client, commenter_email, comment_validator_email, comment_text, token, my_ulid):
     token = token.replace('+','%2B')
     charset = "UTF-8"
     html_email_content = f"""
@@ -35,10 +35,10 @@ def send_email(ses_client, commenter_email, comment_validator_email, comment_tex
             },
             "Subject": {
                 "Charset": charset,
-                "Data": "JS Commenter Validation",
+                "Data": f"Validate JS Comment: {my_ulid[-6:]}",
             },
         },
-        Source=f"JS Comment Validator <{comment_validator_email}>",
+        Source=f"JS Comments <{comment_validator_email}>",
     )
     return response
 
@@ -47,7 +47,8 @@ def lambda_handler(event, context):
     comment_validator_email = event['comment_validator_email']
     comment_text = event['comment_text']
     token = event['token']
-    response = send_email(ses_client, commenter_email, comment_validator_email, comment_text, token)
+    my_ulid = event['ulid']
+    response = send_email(ses_client, commenter_email, comment_validator_email, comment_text, token, my_ulid)
     print(response)
     return {
         "post_id": "TEST_POST_ID",

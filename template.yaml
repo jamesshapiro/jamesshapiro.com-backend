@@ -48,15 +48,24 @@ Resources:
       PathPart: commenter-confirmation
       RestApiId: !Ref CommentApi
 
+  ConfirmModeratorApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      ParentId: !GetAtt CommentApi.RootResourceId
+      PathPart: moderator-confirmation
+      RestApiId: !Ref CommentApi
+
   ConfirmCommenterApiDeployment:
     Type: AWS::ApiGateway::Deployment
     Properties:
       Description: production
       RestApiId: !Ref CommentApi
       StageName: production
-    DependsOn: ConfirmCommenterApiMethod
+    DependsOn:
+      - ConfirmCommenterApiMethod
+      - ConfirmModeratorApiMethod
 
-  ConfirmCommenterApiRole:
+  ConfirmCommentApiRole:
     Type: AWS::IAM::Role
     Properties:
       Path: '/'
@@ -91,16 +100,35 @@ Resources:
         Uri: 'arn:aws:apigateway:us-east-1:states:action/SendTaskSuccess'
         IntegrationHttpMethod: 'POST'
         PassthroughBehavior: 'WHEN_NO_TEMPLATES'
-        #RequestParameters:
-        #  method.request.querystring.token: 'method.request.querystring.token'
         RequestTemplates:
           #'application/json': '{"taskToken": "$input.params(''token'')"}'
           #'application/json': '{"output": "[\"SUCCESS\"]", "taskToken": "$input.params(''token'')"}'
           'application/json': '{"output": "{\"decision\": \"confirm\", \"comment_ulid\": \"DUMMY#ULID\"}", "taskToken": "$input.params(''token'')"}'
 
-        Credentials: !GetAtt ConfirmCommenterApiRole.Arn
+        Credentials: !GetAtt ConfirmCommentApiRole.Arn
       RestApiId: !Ref CommentApi
       ResourceId: !Ref ConfirmCommenterApiResource
+
+  ConfirmModeratorApiMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      HttpMethod: 'GET'
+      AuthorizationType: 'NONE'
+      RequestParameters:
+        method.request.querystring.token: true
+      Integration:
+        Type: AWS
+        Uri: 'arn:aws:apigateway:us-east-1:states:action/SendTaskSuccess'
+        IntegrationHttpMethod: 'POST'
+        PassthroughBehavior: 'WHEN_NO_TEMPLATES'
+        RequestTemplates:
+          #'application/json': '{"taskToken": "$input.params(''token'')"}'
+          #'application/json': '{"output": "[\"SUCCESS\"]", "taskToken": "$input.params(''token'')"}'
+          'application/json': '{"output": "{\"decision\": \"confirm\", \"comment_ulid\": \"DUMMY#ULID\"}", "taskToken": "$input.params(''token'')"}'
+
+        Credentials: !GetAtt ConfirmCommentApiRole.Arn
+      RestApiId: !Ref CommentApi
+      ResourceId: !Ref ConfirmModeratorApiResource
 
   ChallengeCommenterEmailFunction:
     Type: AWS::Serverless::Function
@@ -123,7 +151,6 @@ Resources:
       Handler: app.lambda_handler
       Runtime: python3.9
       Timeout: 30
-      # Role: !GetAtt ConfirmEmailRole.Arn
 
   ChallengeModeratorEmailFunction:
     Type: AWS::Serverless::Function
@@ -136,47 +163,6 @@ Resources:
         # TODO: parameterize
         - SESCrudPolicy:
             IdentityName: 'jamesshapirocomments+athens@gmail.com'
-
-  ConfirmModeratorEmailFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: functions/confirm_moderator_email/
-      Handler: app.lambda_handler
-      Runtime: python3.9
-      Timeout: 30
-      Role: !GetAtt ConfirmEmailRole.Arn
-      Events:
-        CommentApiEvent:
-          Type: Api
-          Properties:
-            RestApiId: !Ref CommentApi
-            Path: /moderator-confirmation/
-            Method: get
-
-  ConfirmEmailRole:
-    Type: AWS::IAM::Role
-    Properties:
-      Path: '/'
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Action:
-              - sts:AssumeRole
-            Principal:
-              Service:
-                - lambda.amazonaws.com
-      Policies:
-        - PolicyName: root
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - states:SendTaskSuccess
-                Resource: !Ref CommentValidator
 
   CommentsDDBTable:
     Type: AWS::DynamoDB::Table
@@ -285,21 +271,11 @@ Resources:
       ServiceToken: !GetAtt ValueFunc.Arn
       ChallengeCommenterEmailFunction: !Ref ChallengeCommenterEmailFunction
       ChallengeModeratorEmailFunction: !Ref ChallengeModeratorEmailFunction
-      ConfirmModeratorEmailFunction: !Ref ConfirmModeratorEmailFunction
 
 Outputs:
-  CommentValidatorArn:
-    Description: 'Stock Trading State machine ARN'
-    Value: !Ref CommentValidator
-  CommentValidatorRoleArn:
-    Description: 'IAM Role created for Stock Trading State machine based on the specified SAM Policy Templates'
-    Value: !GetAtt CommentValidatorRole.Arn
-  ConfirmCommenterApiEndpoint:
+  EntryPointApiEndpoint:
     Description: 'API Gateway endpoint URL for Prod stage for Comment Approval Workflow operations'
-    Value: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/production/commenter-confirmation/'
-  ConfirmModeratorApiEndpoint:
-    Description: 'API Gateway endpoint URL for Prod stage for Comment Approval Workflow operations'
-    Value: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/production/moderator-confirmation/'
+    Value: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/production/entry-point/'
   LambdaFunctionUpdatedValue:
     Description: 'Was the Lambda Function updated?'
     Value: !GetAtt GetLambdaFunctionWasUpdatedValue.Data

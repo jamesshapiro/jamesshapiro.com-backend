@@ -21,25 +21,12 @@
           "comment_validator_email.$": "$.comment_validator_email",
           "moderator_email.$": "$.moderator_email",
           "comment_text.$": "$.comment_text",
+          "ulid.$": "$.ulid.ulid",
           "token.$": "$$.Task.Token"
         }
       },
-      "Next": "Check Commenter Decision",
+      "Next": "Record Comment",
       "ResultPath": "$.taskresult"
-    },
-    "Check Commenter Decision": {
-      "Type": "Choice",
-      "Choices": [
-        {
-          "Variable": "$.taskresult.decision",
-          "StringEquals": "confirm",
-          "Next": "Record Comment"
-        }
-      ],
-      "Default": "Reject State"
-    },
-    "Reject State": {
-      "Type": "Succeed"
     },
     "Record Comment": {
       "Type": "Task",
@@ -51,7 +38,7 @@
             "S.$": "$.post_id"
           },
           "SK1": {
-            "S.$": "$.taskresult.comment_ulid"
+            "S.$": "$.ulid.ulid"
           },
           "COMMENT_TEXT": {
             "S.$": "$.comment_text"
@@ -90,22 +77,12 @@
           "comment_validator_email.$": "$.comment_validator_email",
           "moderator_email.$": "$.moderator_email",
           "comment_text.$": "$.comment_text",
-          "token.$": "$$.Task.Token"
+          "token.$": "$$.Task.Token",
+          "ulid.$": "$.ulid.ulid"
         }
       },
-      "Next": "Check Moderator Decision",
+      "Next": "Approve Comment",
       "ResultPath": "$.moderatordecision"
-    },
-    "Check Moderator Decision": {
-      "Type": "Choice",
-      "Choices": [
-        {
-          "Variable": "$.moderatordecision.decision",
-          "StringEquals": "confirm",
-          "Next": "Approve Comment"
-        }
-      ],
-      "Default": "Reject State"
     },
     "Approve Comment": {
       "Type": "Task",
@@ -117,7 +94,7 @@
             "S.$": "$.post_id"
           },
           "SK1": {
-            "S.$": "$.taskresult.comment_ulid"
+            "S.$": "$.ulid.ulid"
           }
         },
         "UpdateExpression": "SET #moderator_approved = :true_literal",
