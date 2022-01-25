@@ -88,6 +88,26 @@ Resources:
                   - states:SendTaskSuccess
                 Resource: !Ref CommentValidator
 
+  GatewayEmptyModel:
+    Type: AWS::ApiGateway::Model
+    Properties:
+      ContentType: 'application/json'
+      RestApiId: !Ref CommentApi
+      Schema: {}
+
+  # GatewayEmptyModel:
+  #   Type: AWS::ApiGateway::Model
+  #   Properties:
+  #     ContentType: 'application/json'
+  #     RestApiId: !Ref CommentApi
+  #     Schema:
+  #       $schema : 'http://json-schema.org/draft-04/schema#'
+  #       title : Response Schema
+  #       type : object
+  #       properties:
+  #         response:
+  #           type: string
+
   ConfirmCommenterApiMethod:
     Type: AWS::ApiGateway::Method
     Properties:
@@ -101,13 +121,20 @@ Resources:
         IntegrationHttpMethod: 'POST'
         PassthroughBehavior: 'WHEN_NO_TEMPLATES'
         RequestTemplates:
-          #'application/json': '{"taskToken": "$input.params(''token'')"}'
-          #'application/json': '{"output": "[\"SUCCESS\"]", "taskToken": "$input.params(''token'')"}'
-          'application/json': '{"output": "{\"decision\": \"confirm\", \"comment_ulid\": \"DUMMY#ULID\"}", "taskToken": "$input.params(''token'')"}'
-
+          'application/json': '{"output": "{\"decision\": \"confirm\"}", "taskToken": "$input.params(''token'')"}'
         Credentials: !GetAtt ConfirmCommentApiRole.Arn
+        IntegrationResponses:
+          - StatusCode: '200'
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                {"response": "comment approved"}
       RestApiId: !Ref CommentApi
       ResourceId: !Ref ConfirmCommenterApiResource
+      MethodResponses:
+        - ResponseModels:
+            'application/json': !Ref GatewayEmptyModel
+          StatusCode: '200'
 
   ConfirmModeratorApiMethod:
     Type: AWS::ApiGateway::Method
@@ -122,13 +149,22 @@ Resources:
         IntegrationHttpMethod: 'POST'
         PassthroughBehavior: 'WHEN_NO_TEMPLATES'
         RequestTemplates:
-          #'application/json': '{"taskToken": "$input.params(''token'')"}'
-          #'application/json': '{"output": "[\"SUCCESS\"]", "taskToken": "$input.params(''token'')"}'
-          'application/json': '{"output": "{\"decision\": \"confirm\", \"comment_ulid\": \"DUMMY#ULID\"}", "taskToken": "$input.params(''token'')"}'
-
+          'application/json': '{"output": "{\"decision\": \"confirm\"}", "taskToken": "$input.params(''token'')"}'
+        RequestTemplates:
+          'application/json': '{"output": "{\"decision\": \"confirm\"}", "taskToken": "$input.params(''token'')"}'
         Credentials: !GetAtt ConfirmCommentApiRole.Arn
+        IntegrationResponses:
+          - StatusCode: '200'
+            ResponseTemplates:
+              application/json: |
+                #set($inputRoot = $input.path('$'))
+                {"response": "comment submitted"}
       RestApiId: !Ref CommentApi
       ResourceId: !Ref ConfirmModeratorApiResource
+      MethodResponses:
+        - ResponseModels:
+            'application/json': !Ref GatewayEmptyModel
+          StatusCode: '200'
 
   ChallengeCommenterEmailFunction:
     Type: AWS::Serverless::Function
