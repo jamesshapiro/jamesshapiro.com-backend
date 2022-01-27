@@ -11,8 +11,7 @@ Resources:
     Properties:
       DefinitionUri: statemachine/comment_validator.asl.json
       DefinitionSubstitutions:
-        ChallengeCommenterEmailFunctionArn: !GetAtt ChallengeCommenterEmailFunction.Arn
-        ChallengeModeratorEmailFunctionArn: !GetAtt ChallengeModeratorEmailFunction.Arn
+        ChallengeEmailFunctionArn: !GetAtt ChallengeEmailFunction.Arn
         GenerateUlidFunctionArn: !GetAtt GenerateUlidFunction.Arn
         DDBPutItem: !Sub arn:${AWS::Partition}:states:::dynamodb:putItem
         DDBUpdateItem: !Sub arn:${AWS::Partition}:states:::dynamodb:updateItem
@@ -26,11 +25,9 @@ Resources:
             Method: post
       Policies:
         - LambdaInvokePolicy:
-            FunctionName: !Ref ChallengeCommenterEmailFunction
+            FunctionName: !Ref ChallengeEmailFunction
         - LambdaInvokePolicy:
             FunctionName: !Ref GenerateUlidFunction
-        - LambdaInvokePolicy:
-            FunctionName: !Ref ChallengeModeratorEmailFunction
         - DynamoDBCrudPolicy:
             TableName: !Ref CommentsDDBTable
 
@@ -41,18 +38,18 @@ Resources:
       Auth:
         AddDefaultAuthorizerToCorsPreflight: false
 
-  ConfirmCommenterApiResource:
+  ConfirmCommentApiResource:
     Type: AWS::ApiGateway::Resource
     Properties:
       ParentId: !GetAtt CommentApi.RootResourceId
-      PathPart: commenter-confirmation
+      PathPart: success
       RestApiId: !Ref CommentApi
 
-  ConfirmModeratorApiResource:
+  RejectCommentApiResource:
     Type: AWS::ApiGateway::Resource
     Properties:
       ParentId: !GetAtt CommentApi.RootResourceId
-      PathPart: moderator-confirmation
+      PathPart: failure
       RestApiId: !Ref CommentApi
 
   ConfirmCommenterApiDeployment:
@@ -62,10 +59,10 @@ Resources:
       RestApiId: !Ref CommentApi
       StageName: production
     DependsOn:
-      - ConfirmCommenterApiMethod
-      - ConfirmModeratorApiMethod
+      - ApproveCommentApiMethod
+      - RejectCommentApiMethod
 
-  ConfirmCommentApiRole:
+  ReviewCommentApiRole:
     Type: AWS::IAM::Role
     Properties:
       Path: '/'
@@ -86,6 +83,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - states:SendTaskSuccess
+                  - states:SendTaskFailure
                 Resource: !Ref CommentValidator
 
   GatewayEmptyModel:
@@ -108,7 +106,7 @@ Resources:
   #         response:
   #           type: string
 
-  ConfirmCommenterApiMethod:
+  ApproveCommentApiMethod:
     Type: AWS::ApiGateway::Method
     Properties:
       HttpMethod: 'GET'
@@ -121,22 +119,22 @@ Resources:
         IntegrationHttpMethod: 'POST'
         PassthroughBehavior: 'WHEN_NO_TEMPLATES'
         RequestTemplates:
-          'application/json': '{"output": "{\"decision\": \"confirm\"}", "taskToken": "$input.params(''token'')"}'
-        Credentials: !GetAtt ConfirmCommentApiRole.Arn
+          'application/json': '{"output": "{\"decision\": \"approve\"}", "taskToken": "$input.params(''token'')"}'
+        Credentials: !GetAtt ReviewCommentApiRole.Arn
         IntegrationResponses:
           - StatusCode: '200'
             ResponseTemplates:
               application/json: |
                 #set($inputRoot = $input.path('$'))
-                {"response": "comment approved"}
+                {"response": "comment submitted for approval!"}
       RestApiId: !Ref CommentApi
-      ResourceId: !Ref ConfirmCommenterApiResource
+      ResourceId: !Ref ConfirmCommentApiResource
       MethodResponses:
         - ResponseModels:
             'application/json': !Ref GatewayEmptyModel
           StatusCode: '200'
 
-  ConfirmModeratorApiMethod:
+  RejectCommentApiMethod:
     Type: AWS::ApiGateway::Method
     Properties:
       HttpMethod: 'GET'
@@ -145,31 +143,29 @@ Resources:
         method.request.querystring.token: true
       Integration:
         Type: AWS
-        Uri: 'arn:aws:apigateway:us-east-1:states:action/SendTaskSuccess'
+        Uri: 'arn:aws:apigateway:us-east-1:states:action/SendTaskFailure'
         IntegrationHttpMethod: 'POST'
         PassthroughBehavior: 'WHEN_NO_TEMPLATES'
         RequestTemplates:
-          'application/json': '{"output": "{\"decision\": \"confirm\"}", "taskToken": "$input.params(''token'')"}'
-        RequestTemplates:
-          'application/json': '{"output": "{\"decision\": \"confirm\"}", "taskToken": "$input.params(''token'')"}'
-        Credentials: !GetAtt ConfirmCommentApiRole.Arn
+          'application/json': '{"error": "rejected", "cause": "comment was rejected by commenter or moderator", "taskToken": "$input.params(''token'')"}'
+        Credentials: !GetAtt ReviewCommentApiRole.Arn
         IntegrationResponses:
           - StatusCode: '200'
             ResponseTemplates:
               application/json: |
                 #set($inputRoot = $input.path('$'))
-                {"response": "comment submitted"}
+                {"response": "comment rejected"}
       RestApiId: !Ref CommentApi
-      ResourceId: !Ref ConfirmModeratorApiResource
+      ResourceId: !Ref RejectCommentApiResource
       MethodResponses:
         - ResponseModels:
             'application/json': !Ref GatewayEmptyModel
           StatusCode: '200'
 
-  ChallengeCommenterEmailFunction:
+  ChallengeEmailFunction:
     Type: AWS::Serverless::Function
     Properties:
-      CodeUri: functions/challenge_commenter_email/
+      CodeUri: functions/challenge_email/
       Handler: app.lambda_handler
       Runtime: python3.9
       Timeout: 30
@@ -187,18 +183,6 @@ Resources:
       Handler: app.lambda_handler
       Runtime: python3.9
       Timeout: 30
-
-  ChallengeModeratorEmailFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      CodeUri: functions/challenge_moderator_email/
-      Handler: app.lambda_handler
-      Runtime: python3.9
-      Timeout: 30
-      Policies:
-        # TODO: parameterize
-        - SESCrudPolicy:
-            IdentityName: 'jamesshapirocomments+athens@gmail.com'
 
   CommentsDDBTable:
     Type: AWS::DynamoDB::Table
@@ -254,8 +238,7 @@ Resources:
               - Effect: Allow
                 Action: lambda:UpdateFunctionConfiguration
                 Resource:
-                  - !GetAtt ChallengeCommenterEmailFunction.Arn
-                  - !GetAtt ChallengeModeratorEmailFunction.Arn
+                  - !GetAtt ChallengeEmailFunction.Arn
 
   ValueFunc:
     Type: AWS::Lambda::Function
@@ -265,31 +248,28 @@ Resources:
           import boto3
           import cfnresponse
           import os
+          import sys
           def lambda_handler(event, context):
             responseData = {}
             try:
               response_code = 200
               lambda_client = boto3.client('lambda')
-              confirm_commenter_endpoint = os.environ['CONFIRM_COMMENTER_ENDPOINT']
-              confirm_moderator_endpoint = os.environ['CONFIRM_MODERATOR_ENDPOINT']
-              confirm_commenter_function_name = os.environ['CONFIRM_COMMENTER_FUNCTION_NAME']
-              confirm_moderator_function_name = os.environ['CONFIRM_MODERATOR_FUNCTION_NAME']
-              endpoints = [confirm_commenter_endpoint, confirm_moderator_endpoint]
-              function_names = [confirm_commenter_function_name, confirm_moderator_function_name]
-              for endpoint, function_name in zip(endpoints, function_names):
-                print(endpoint, function_name)
-                response = lambda_client.update_function_configuration(
-                  FunctionName=function_name,
-                  Environment={
-                    'Variables': {
-                        'CONFIRMATION_ENDPOINT': endpoint
-                    }
+              response = lambda_client.update_function_configuration(
+                FunctionName=os.environ['CHALLENGE_EMAIL_FUNCTION_NAME'],
+                Environment={
+                  'Variables': {
+                      'APPROVE_COMMENT_ENDPOINT': os.environ['APPROVE_COMMENT_ENDPOINT'],
+                      'REJECT_COMMENT_ENDPOINT': os.environ['REJECT_COMMENT_ENDPOINT']
                   }
-                )
-              responseData['Data'] = 'SUCCESS3'
+                }
+              )
+              print(f'{response=}')
+              responseData['Data'] = 'SUCCESS4'
               cfnresponse.send(event, context, cfnresponse.SUCCESS, responseData, "CustomResourcePhysicalID", noEcho=True)
             except:
               responseData['Data'] = 'FAILURE'
+              e = sys.exc_info()[0]
+              print(e)
               cfnresponse.send(event, context, cfnresponse.FAILED, responseData, "CustomResourcePhysicalID" )
       Handler: index.lambda_handler
       Runtime: python3.8
@@ -297,16 +277,16 @@ Resources:
       Role: !Sub 'arn:aws:iam::${AWS::AccountId}:role/${ValueFuncExecutionRole}'
       Environment:
         Variables:
-          CONFIRM_COMMENTER_ENDPOINT: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/production/commenter-confirmation/'
-          CONFIRM_MODERATOR_ENDPOINT: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/production/moderator-confirmation/'
-          CONFIRM_COMMENTER_FUNCTION_NAME: !Ref ChallengeCommenterEmailFunction
-          CONFIRM_MODERATOR_FUNCTION_NAME: !Ref ChallengeModeratorEmailFunction
+          APPROVE_COMMENT_ENDPOINT: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/production/success/'
+          REJECT_COMMENT_ENDPOINT: !Sub 'https://${CommentApi}.execute-api.${AWS::Region}.amazonaws.com/production/failure/'
+          CHALLENGE_EMAIL_FUNCTION_NAME: !Ref ChallengeEmailFunction
   GetLambdaFunctionWasUpdatedValue:
     Type: Custom::LambdaCallout
     Properties:
       ServiceToken: !GetAtt ValueFunc.Arn
-      ChallengeCommenterEmailFunction: !Ref ChallengeCommenterEmailFunction
-      ChallengeModeratorEmailFunction: !Ref ChallengeModeratorEmailFunction
+      ChallengeEmailFunction: !Ref ChallengeEmailFunction
+      ApproveCommentApiMethod: !Ref ApproveCommentApiMethod
+      RejectCommentApiMethod: !Ref RejectCommentApiMethod
 
 Outputs:
   EntryPointApiEndpoint:

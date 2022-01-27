@@ -14,21 +14,23 @@
       "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
       "TimeoutSeconds": 3600,
       "Parameters": {
-        "FunctionName": "${ChallengeCommenterEmailFunctionArn}",
+        "FunctionName": "${ChallengeEmailFunctionArn}",
         "Payload": {
           "post_id.$": "$.post_id",
+          "recipient_email.$": "$.commenter_email",
           "commenter_email.$": "$.commenter_email",
           "comment_validator_email.$": "$.comment_validator_email",
           "moderator_email.$": "$.moderator_email",
           "comment_text.$": "$.comment_text",
           "ulid.$": "$.ulid.ulid",
-          "token.$": "$$.Task.Token"
+          "token.$": "$$.Task.Token",
+          "is_moderator": "false"
         }
       },
-      "Next": "Record Comment",
+      "Next": "Log Comment",
       "ResultPath": "$.taskresult"
     },
-    "Record Comment": {
+    "Log Comment": {
       "Type": "Task",
       "Resource": "${DDBPutItem}",
       "Parameters": {
@@ -70,21 +72,23 @@
       "Resource": "arn:aws:states:::lambda:invoke.waitForTaskToken",
       "TimeoutSeconds": 604800,
       "Parameters": {
-        "FunctionName": "${ChallengeModeratorEmailFunctionArn}",
+        "FunctionName": "${ChallengeEmailFunctionArn}",
         "Payload": {
           "post_id.$": "$.post_id",
+          "recipient_email.$": "$.moderator_email",
           "commenter_email.$": "$.commenter_email",
           "comment_validator_email.$": "$.comment_validator_email",
           "moderator_email.$": "$.moderator_email",
           "comment_text.$": "$.comment_text",
+          "ulid.$": "$.ulid.ulid",
           "token.$": "$$.Task.Token",
-          "ulid.$": "$.ulid.ulid"
+          "is_moderator": "true"
         }
       },
-      "Next": "Approve Comment",
+      "Next": "Publish Comment",
       "ResultPath": "$.moderatordecision"
     },
-    "Approve Comment": {
+    "Publish Comment": {
       "Type": "Task",
       "Resource": "${DDBUpdateItem}",
       "Parameters": {
